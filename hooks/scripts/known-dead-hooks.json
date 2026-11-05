@@ -1,0 +1,4 @@
+{
+  "$comment": "RATCHET BASELINE - hooks registered in entries maps but unreachable from any dispatch path (hooks.json, agent/skill frontmatter, dispatcher fan-out). Baseline emptied on 2026-07-15 by the dead-hook triage (all 46 grandfathered hooks deleted) and must stay empty: validate-registry.mjs fails on any new dead hook. Do not add entries.",
+  "grandfathered": []
+}

@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "mcp__context7__*",
+      "mcp__memory__*"
+    ],
+    "deny": [
+      "Read(~/.aws/credentials)",
+      "Read(~/.ssh/**)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.netrc)",
+      "Read(~/.npmrc)",
+      "Bash(rm -rf /)",
+      "Bash(rm -rf ~)",
+      "Bash(rm -rf .)",
+      "Bash(rm -rf /private/etc*)",
+      "Bash(rm -rf /private/var*)",
+      "Bash(rm -rf /private/home*)",
+      "Bash(rm -fr /private/etc*)",
+      "Bash(rm -fr /private/var*)",
+      "Bash(rm -fr /private/home*)",
+      "Bash(find *-delete*)",
+      "Bash(find *-fprint*)",
+      "Bash(chmod 777 *)",
+      "Bash(chmod -R 777 *)",
+      "Bash(git push --force origin main)",
+      "Bash(git push --force origin master)",
+      "Bash(git push -f origin main)",
+      "Bash(git push -f origin master)",
+      "Bash(mkfs*)",
+      "Bash(dd if=*)",
+      "Bash(> /dev/sd*)"
+    ]
+  }
+}

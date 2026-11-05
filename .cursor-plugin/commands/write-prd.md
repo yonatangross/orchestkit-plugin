@@ -1,0 +1,143 @@
+---
+description: "Product Requirements Documents: 8-section template, user stories, acceptance criteria, go/no-go. Use when writing a PRD or user stories."
+argument-hint: "product name or feature"
+disable-model-invocation: false
+context: fork
+agent: product-strategist
+user-invocable: true
+name: write-prd
+background: false
+allowed-tools: "Read Write Edit Glob Grep Bash WebFetch WebSearch AskUserQuestion TaskCreate TaskUpdate Agent mcp__memory__search_nodes mcp__memory__create_entities mcp__memory__add_observations mcp__memory__create_relations"
+---
+
+# Auto-generated from skills/write-prd/SKILL.md
+# Source: https://github.com/yonatangross/orchestkit
+
+
+# PRD — Product Requirements Document
+
+Translate product vision and research into clear, actionable engineering specifications. Produces `PRD-[product-name].md` output files following an 8-section structure.
+
+**Output file naming:** `PRD-[product-name].md` (e.g., `PRD-sso-invite-flow.md`)
+
+## Argument Resolution
+
+```python
+PRODUCT = "$ARGUMENTS"  # Product name or feature, e.g., "SSO invite flow"
+```
+
+## STEP 0: Scope Clarification
+
+```python
+AskUserQuestion(
+  questions=[{
+    "question": "What type of PRD?",
+    "header": "PRD Scope",
+    "options": [
+      {"label": "Full PRD (Recommended)", "description": "All 8 sections with research, stories, and release plan"},
+      {"label": "Lightweight spec", "description": "Summary, objectives, user stories only"},
+      {"label": "User stories only", "description": "INVEST stories with acceptance criteria"},
+      {"label": "Update existing PRD", "description": "I have a PRD file to iterate on"}
+    ],
+    "multiSelect": false
+  }]
+)
+```
+
+## Task Management
+
+```python
+# 1. Create main task IMMEDIATELY
+TaskCreate(subject="Write PRD: {PRODUCT}", description="8-section PRD with user stories and acceptance criteria", activeForm="Writing PRD for {PRODUCT}")
+
+# 2. Create subtasks for each phase
+TaskCreate(subject="Scope clarification", activeForm="Clarifying PRD scope")                       # id=2
+TaskCreate(subject="Research and memory check", activeForm="Researching prior PRDs")               # id=3
+TaskCreate(subject="Draft 8-section PRD", activeForm="Drafting PRD sections")                      # id=4
+TaskCreate(subject="Write user stories and acceptance criteria", activeForm="Writing user stories") # id=5
+TaskCreate(subject="Write output file", activeForm="Writing PRD file")                             # id=6
+
+# 3. Set dependencies for sequential phases
+TaskUpdate(taskId="3", addBlockedBy=["2"])  # Research needs scope first
+TaskUpdate(taskId="4", addBlockedBy=["3"])  # Drafting needs research context
+TaskUpdate(taskId="5", addBlockedBy=["4"])  # Stories need draft structure
+TaskUpdate(taskId="6", addBlockedBy=["5"])  # Output needs all sections done
+
+# 4. Update status as you progress
+TaskUpdate(taskId="2", status="in_progress")  # When starting
+TaskUpdate(taskId="2", status="completed")    # When done — repeat for each subtask
+```
+
+## Memory Integration
+
+```python
+# Search for prior PRDs and product decisions
+mcp__memory__search_nodes(query="{PRODUCT} PRD requirements")
+
+# After PRD is written, store key decisions
+mcp__memory__create_entities(entities=[{
+  "name": "PRD-{product-slug}",
+  "entityType": "document",
+  "observations": ["PRD written for {PRODUCT}", "Key objectives: ..."]
+}])
+```
+
+## The 8-Section PRD Template
+
+Load `Read("skills/write-prd/references/prd-template.md")` for the full template with all 8 sections (Summary, Contacts, Background, Objective, Market Segments, Value Propositions, Solution, Release), priority levels, and NFR categories.
+
+## User Stories & Acceptance Criteria
+
+Load `Read("skills/write-prd/references/user-stories-guide.md")` for INVEST criteria, story format, Gherkin acceptance criteria, and Definition of Ready/Done.
+
+## Value Proposition Canvas
+
+Load `Read("skills/write-prd/references/value-prop-canvas-guide.md")` for the canvas template and fit check process. Every Value Map item must correspond to a Job, Pain, or Gain.
+
+## Go/No-Go Gate Criteria
+
+Load from rules: `Read("skills/write-prd/rules/strategy-go-no-go.md")` for stage gate criteria and scoring thresholds (Go >= 7.0 | Conditional 5.0-6.9 | No-Go < 5.0).
+
+## Rules (Load On-Demand)
+
+- [research-requirements-prd.md](skills/write-prd/rules/research-requirements-prd.md) — INVEST user stories, PRD template, priority levels, DoR/DoD
+- [strategy-value-prop.md](skills/write-prd/rules/strategy-value-prop.md) — Value proposition canvas, JTBD framework, fit assessment
+- [strategy-go-no-go.md](skills/write-prd/rules/strategy-go-no-go.md) — Stage gate criteria, scoring, build/buy/partner decision matrix
+
+## References
+
+- [output-templates.md](skills/write-prd/references/output-templates.md) — Structured JSON output schemas for PRD, business case, and strategy artifacts
+- [value-prop-canvas-guide.md](skills/write-prd/references/value-prop-canvas-guide.md) — Detailed value proposition canvas facilitation guide
+
+## Output
+
+After generating the PRD, write it to disk:
+
+```python
+Write(f"PRD-{product_slug}.md", prd_content)
+TaskUpdate(status="completed")
+```
+
+> **Plan-mode filenames (CC 2.1.111+):** If this skill enters plan mode (via `EnterPlanMode`) before writing the PRD, CC 2.1.111 names the resulting plan file after the prompt stem rather than random words. To get a clean filename, include the product slug in the plan-mode prompt (e.g. `EnterPlanMode("PRD: authentication-rework")` → `plans/prd-authentication-rework.md`). Before 2.1.111, plan filenames were `plans/swift-cobra.md` etc. — review and rename as needed.
+
+## Chain: Next Steps
+
+After PRD is approved, decompose its acceptance criteria into a runnable goal, then implement:
+
+```
+prd-to-goal PRD-{product-slug}.md   # → one copy-pasteable `/goal until …, or stop after N turns` line
+implement PRD-{product-slug}.md
+```
+
+`prd-to-goal` reduces the Go/No-Go gate + acceptance criteria below into a single AND-joined boolean assertion, so the PRD drives an autonomous `/goal` run rather than a manual read-through.
+
+## Related Skills
+
+- `ork:user-research` — Build user understanding (personas, journey maps, interviews) before writing the PRD
+- `ork:prd-to-goal` — Reduce this PRD's acceptance criteria to a single `/goal until …, or stop after N turns` line
+- `ork:implement` — Execute the implementation plan from the PRD
+- `ork:brainstorm` — Explore solution alternatives before committing to PRD scope
+- `ork:assess` — Rate PRD quality and completeness
+
+
+**Version:** 2.0.0

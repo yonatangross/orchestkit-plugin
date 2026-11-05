@@ -1,0 +1,860 @@
+# Contributing Skills
+
+Standards for authoring OrchestKit skills. Read this before creating or modifying skills.
+
+Based on [Anthropic Skill Authoring Best Practices](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices), [Vercel agent-skills](https://github.com/vercel-labs/agent-skills) (129K installs), and the [Agent Skills Open Standard](https://agentskills.io).
+
+## Publish Channels
+
+OrchestKit ships built skills through two independent channels:
+
+1. **CC plugin marketplace** — the only channel in production today. See
+   `docs/marketplace-submission.md` (supported platform is stated there as
+   **Claude Code only**; that positioning claim is unchanged by the second
+   channel below and flipping it is a separate operator decision).
+2. **Claude Platform Skills API** (`/v1/skills`) — `scripts/publish-skills.mjs`
+   packages the BUILT tree (`plugins/ork/skills/*/SKILL.md`, not `src/`) and
+   validates each skill against the API's `name`/`description` constraints
+   before composing an upload payload.
+
+Publishing is **manual and operator-gated**: the script defaults to dry-run
+(compose + validate, no network call) and a real upload requires both
+`--publish` and `ANTHROPIC_API_KEY` set explicitly. It is never run with
+`--publish` from CI or from any automated skill-authoring workflow — see the
+script's own header comment for the full constraint list and usage.
+
+## Skill Directory Structure
+
+```
+src/skills/my-skill/
+├── SKILL.md              # Main instructions (required, < 500 lines)
+├── rules/                # Prescriptive patterns (optional)
+│   ├── _sections.md      # TOC — categories, impact levels, rule list
+│   ├── _template.md      # Copy this to create new rules
+│   └── area-name.md      # Individual rule files (area-prefixed)
+├── references/           # Explanatory content (optional)
+│   └── topic.md          # Concept overviews, migration guides, decision trees
+├── scripts/              # Executable helpers (optional)
+│   └── helper.sh         # Run via bash, output-only in context
+└── test-cases.json       # Evaluation scenarios (optional)
+```
+
+## SKILL.md
+
+The entrypoint. Claude loads this when the skill is triggered. Keep it focused as an **index/overview** — detailed content goes in supporting files.
+
+### Constraints
+
+- **Under 500 lines** (Anthropic recommendation)
+- **Under 400 lines** preferred — leave room for inline examples
+- Target: ~100-200 lines for index-style skills, ~300-400 for workflow skills
+
+### Nesting code fences
+
+When a code example contains its own ` ``` ` fence (e.g. a Python prompt that
+embeds a TSX scaffold), the outer fence MUST use **more backticks than the
+inner**, not the same count. CommonMark closes a fenced block at the next
+sequence of the same length — same-length fences don't nest. The generated
+mdx then leaks code into prose, MDX parses prose `{...}` as JSX, and acorn
+chokes deep inside `next build`.
+
+❌ **Wrong** — both 3 backticks; inner closes the outer:
+
+````markdown
+```python
+prompt = f"""...
+```tsx
+{component['scaffold']}
+```
+{f"Adapt: {x}" if cond else ''}
+"""
+```
+````
+
+✅ **Right** — 4 backticks outside, 3 inside:
+
+`````markdown
+````python
+prompt = f"""...
+```tsx
+{component['scaffold']}
+```
+{f"Adapt: {x}" if cond else ''}
+"""
+````
+`````
+
+The mdx-compile guard (`tests/unit/test-mdx-compile.sh`, runs on `npm test`)
+catches this regression. See PR #1399 for the original incident.
+
+### Required Frontmatter
+
+```yaml
+---
+name: my-skill
+description: What it does AND when to use it. Write in third person.
+user-invocable: false    # true for /slash-command skills
+effort: low | high              # CC 2.1.80+: override model effort level (omit for auto)
+metadata:                # ork house keys: quoted strings, never top level
+  version: "2.0.0"
+  author: "OrchestKit"
+  complexity: "low"      # low | medium | high
+  tags: "tag1, tag2, tag3"
+---
+```
+
+`version`, `author`, `complexity` and `tags` are ork house keys, not Agent Skills
+spec keys, so they live under `metadata:` as a one-level map of quoted strings
+(`tags` is comma-separated there). `scripts/check-frontmatter.py` (configs/standards.json)
+reports any of them at top level. The build and docs readers lift them back out
+of `metadata` through `scripts/lib/parse-frontmatter.js`, so read them through
+that parser rather than grepping for `^tags:`.
+
+The `description` is critical — Claude uses it to decide whether to load the skill. Include both **what** (capabilities) and **when** (trigger conditions). Max 1024 chars.
+
+**Good**: "API design patterns for REST/GraphQL framework design, versioning strategies, and RFC 9457 error handling. Use when designing API endpoints, choosing versioning schemes, implementing Problem Details errors, or building OpenAPI specifications."
+
+**Bad**: "Helps with APIs."
+
+### Optional Frontmatter
+
+```yaml
+context: fork            # Run in isolated subagent (task skills only; see Prompt caching rule 1)
+background: false        # With context: fork, the parent waits for the result (CC 2.1.218+)
+agent: backend-system-architect  # Which subagent type (requires context: fork)
+disable-model-invocation: true   # Manual-only (/slash-command) — DEFAULT
+disable-model-invocation: false  # CC auto-selects via description matching
+allowed-tools: Read, Grep, Glob  # PRE-GRANT: skips the approval prompt for these
+                                 # tools during the invoking turn. It does NOT restrict:
+                                 # unlisted tools stay callable under your normal
+                                 # permission settings. (An AGENT's `tools:` IS a ceiling;
+                                 # a skill's `allowed-tools` is not.) The Cursor host does
+                                 # read it as a ceiling, so list what your prose instructs:
+                                 # scripts/allowed-tools-check.mjs gates that (#4008).
+disallowed-tools: Write, Edit    # CC 2.1.152+: denylist alternative. ork standardizes on
+                                 # allowed-tools allowlists (strictly tighter than a denylist);
+                                 # reach for disallowed-tools only when a skill must inherit the
+                                 # full toolset minus a few specific tools.
+model: opus              # Model override
+targets:                 # Library version ranges — warns on mismatch (CC 2.1.80+)
+  - library: next.js
+    version: ">=16.0.0"
+paths:                   # YAML list of globs — auto-loaded when skill activates (CC 2.1.84+)
+  - "src/**/*.{ts,tsx}"
+  - "package.json"
+path_patterns:           # Globs for file-aware skill suggestions in CwdChanged (CC 2.1.89+)
+  - "*.py"               # Matches files at project root or 1 level deep
+  - "**/migrations/**"   # Matches nested directory names (2-level scan)
+keep-coding-instructions: true   # CC 2.1.94+: for plugin output styles only —
+                                 # preserves Claude's coding instructions when the
+                                 # skill changes output voice/format. Omit (false)
+                                 # when you want the output style to fully replace
+                                 # the default coding guidance.
+```
+
+**`keep-coding-instructions` (CC 2.1.94+)** is only meaningful for skills that ship as **plugin output styles** — skills that change how Claude speaks (tone, verbosity, persona). It has no effect on workflow or reference skills. Use `true` when the output style is a layer on top of coding (e.g., "explain every change in plain English" — Claude should still know how to code). Use `false` (or omit) when the output style is a full replacement (e.g., a creative-writing skill where code generation doesn't apply).
+
+**Model invocation guide:**
+- Generic invoke is the skill name (`implement`, `verify`). Do not write `/ork:implement` in a skill body. That slash form is Claude Code adapter routing.
+- `disable-model-invocation: true` (default): Claude Code only loads the skill via `/ork:name`. Use for workflow skills that orchestrate subagents (implement, verify, review-pr).
+- `disable-model-invocation: false`: CC auto-selects the skill when the user's prompt matches the `description`. Use for knowledge/reference skills (api-design, security-patterns, testing-unit) that should activate contextually without requiring a slash command. Descriptions may keep `/ork:` for CC slash routing; the body must not require it.
+
+### Skill-Scoped Hooks
+
+Skills can declare hooks in frontmatter. Claude Code registers them when the skill is invoked and keeps them for the rest of the session (see Lifetime below):
+
+```yaml
+hooks:
+  PreToolUse:
+    - matcher: "Read"
+      command: "${CLAUDE_PLUGIN_ROOT}/hooks/bin/run-hook.mjs skill/my-handler"
+      once: true   # CC 2.1.69: runs once then auto-removes (context loaders)
+```
+
+Use `once: true` for one-shot setup (context loading, env detection, precondition checks). Omit `once` for guards that must run on every tool call (security, pattern enforcement).
+
+Lifetime: Claude Code registers a skill's hooks when the skill is invoked and keeps running them for the rest of the session, not only during the skill's own turn (https://code.claude.com/docs/en/hooks, "Hooks in skills and agents"). That is what makes an on-demand guard possible: `careful` and `freeze` register a PreToolUse hook that stays on once the operator invokes them. A guard like that ships as a self-contained script in the skill's own `scripts/` (Node stdlib, deny with exit 2 and the reason on stderr, fail closed on unreadable input) and uses the documented nested shape:
+
+```yaml
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/careful/scripts/careful-guard.mjs"'
+```
+
+It does not go through `run-hook.mjs`, which fails open on a bundle error and depends on the release-built `hooks/dist`.
+
+> **CC 2.1.94 unlock**: Before CC 2.1.94, plugin skill hooks declared in YAML frontmatter were **silently ignored** — the commands were never executed. CC 2.1.94 fixed this, activating the context loaders across OrchestKit skills (assess, implement, verify, brainstorm, review-pr, fix-issue, doctor, explore, cover, setup, commit, quality-gates, visualize-plan, code-review-playbook). These previously-dead hooks now fire on every skill invocation.
+>
+> **Handler requirement**: Every `skill/<name>` reference must be registered in `src/hooks/src/entries/skill.ts`. The test `src/__tests__/skill-frontmatter-hooks-invariant.test.ts` enforces this — any dangling reference will fail CI.
+
+### Invocation Hooks (CC 2.1.89+)
+
+Shell commands that run when a skill activates — before the skill body is loaded. Use for precondition checks and setup:
+
+```yaml
+invocation_hooks:
+  - "command -v vitest >/dev/null || npm install -D vitest"   # install if missing
+  - "test -f playwright.config.ts || echo 'Warning: no Playwright config'"
+```
+
+Keep commands fast (<2s) and idempotent. They run in the user's shell, not in a sandbox.
+
+### Referencing Supporting Files
+
+A SKILL.md body is loaded by more than Claude Code: pi, the Claude Skills API export (`scripts/publish-skills.mjs`) and the Cursor command wrappers (`scripts/build-plugins.sh`) all ship the text, and none of them expand a `${CLAUDE_*}` placeholder (#3822: pi delivered `${CLAUDE_PLUGIN_ROOT}` to the model as a literal string). Portable forms first; Claude-adapter forms only in Claude examples or `references/claude-code.md`.
+
+| Form | Example | Use for |
+|------|---------|---------|
+| Bare relative (preferred) | `Read("references/x.md")`, `[rule](rules/area-name.md)`, `bash scripts/x.sh` | The skill's own files. Resolved against the SKILL.md directory. |
+| Portable cross-skill / shared | `Read("../verify/SKILL.md")`, `Read("../../shared/rules/verification-gate.md")` | Another skill or `shared/`. From `skills/<name>/`, `../<other>/` and `../../shared/` resolve on every host that loads SKILL.md from that directory (CC, pi, Agent Skills). |
+| `${CLAUDE_SKILL_DIR}` | `python3 ${CLAUDE_SKILL_DIR}/scripts/x.py` | Exec shapes in Claude Code only bodies where the cwd is unknown. Put these in `references/claude-code.md` when the skill body must stay portable. |
+| `${CLAUDE_PLUGIN_ROOT}` | hook `command:` lines in YAML frontmatter | Claude-adapter only. YAML hooks that CC executes. Never required in a skill body: pi prints the placeholder as a literal. |
+
+What each consumer does with the form (measured 2026-08-30 on CC 2.1.251 with a throwaway plugin and three nonces, run from `/tmp` and from the skill dir; pi 0.84.4):
+
+| Consumer | Bare relative | `${CLAUDE_SKILL_DIR}` | `${CLAUDE_PLUGIN_ROOT}` |
+|----------|---------------|-----------------------|-------------------------|
+| Claude Code | Resolves against the SKILL.md dir, from any cwd | Expanded (documented substitution) | Expanded |
+| pi | Resolves against the SKILL.md dir (Agent Skills spec) | Literal | Literal |
+| Claude Skills API | `publish-skills.mjs` uploads the whole skill dir; relative resolves per the Agent Skills spec (not measured here) | Literal | Literal |
+| Cursor | Not measured: the wrapper copies the body out of the skill dir | Literal | Literal |
+
+Rules that follow from the matrix:
+
+- Same-skill references are bare relative. `${CLAUDE_PLUGIN_ROOT}/skills/<this-skill>/...` inside that skill's own SKILL.md works in Claude Code and nowhere else; `tests/skills/structure/test-placeholder-validity.sh` fails on it, and `node scripts/codemod/skill-paths-relative.mjs` rewrites it (read shapes to bare relative, exec shapes to `${CLAUDE_SKILL_DIR}`). The one exception is a skill naming its own `SKILL.md` load path for agents (#3313).
+- Cross-skill and `shared/` references in the body use portable relative paths (`../<skill>/...`, `../../shared/...`). `${CLAUDE_PLUGIN_ROOT}` stays in Claude-adapter YAML `command:` lines and in `references/claude-code.md`.
+- Every referenced file must exist. The placeholder gate resolves all three forms against the tree and fails on a missing target, in both `Read("...")` and markdown-link shape.
+- Any other `${CLAUDE_*}` name is undocumented and delivered literally. The gate blocks it.
+
+### Structure Pattern
+
+For skills with rules, use this index layout:
+
+```markdown
+# Skill Name
+
+Brief description. Each category has individual rule files in `rules/` loaded on-demand.
+
+## Quick Reference
+
+| Category | Rules | Impact | When to Use |
+|----------|-------|--------|-------------|
+| [Category A](#category-a) | 3 | HIGH | Brief trigger description |
+| [Category B](#category-b) | 4 | CRITICAL | Brief trigger description |
+
+**Total: N rules across M categories**
+
+## Category A
+
+One-line description of this category.
+
+| Rule | File | Key Pattern |
+|------|------|-------------|
+| Rule Name | `rules/area-name.md` | Brief pattern description |
+
+## Quick Start Example
+
+(Short, runnable code block)
+
+## Key Decisions
+
+| Decision | Recommendation |
+|----------|----------------|
+| Choice A | Option X because Y |
+
+## Common Mistakes
+
+1. Mistake (consequence)
+2. Mistake (consequence)
+```
+
+## Storage Patterns (#1816)
+
+When your skill accumulates state across sessions (decisions, observations, knowledge, ledger entries), pick the storage pattern before you start writing — switching later costs migration work.
+
+| Need | Pattern |
+|---|---|
+| Bounded growth, < 30k total chars | **Rolling logbook** (single `.md` appended forever) |
+| Unbounded growth, lookups by-key or by-date | **Index-per-entry** (small index + sibling files via Read) |
+| Reads as chronological narrative | Rolling logbook |
+| Each entry independently meaningful | Index-per-entry |
+
+**Default to index-per-entry** if unsure — bounded by construction.
+
+CC auto-loads everything matching `.claude/rules/*.md` into every `<system-reminder>`. At 40,000 chars it warns; by then the file has been billing context tokens for weeks. The `lifecycle/rules-size-check` hook (#1815) warns at 35k chars so you have ~5k of runway before the cliff.
+
+Concrete failure case: `yonatan-hq/platform/.claude/rules/recent-decisions.md` reached 53.8k chars in 7 months on the rolling pattern. Index-per-entry would have stayed under 1k forever.
+
+Rule of thumb: store one index entry per decision and let the detail live in a
+per-entry file. Never append to a single rolling `.md` that CC auto-loads.
+
+## Rules
+
+Prescriptive patterns: "do this, not that" with code examples. The core content of tech/pattern skills.
+
+### When to Use `rules/`
+
+- Implementation patterns the agent should follow when writing code
+- Incorrect/correct code pairs showing common mistakes
+- Framework-specific conventions and gotchas
+- Opinionated decisions ("use X, not Y")
+
+### Rule File Format
+
+```yaml
+---
+title: Rule Name
+impact: CRITICAL | HIGH | MEDIUM | LOW
+impactDescription: "One sentence — what goes wrong without this rule"
+tags: tag1, tag2, tag3
+---
+
+## Rule Name
+
+Brief description — 1-2 sentences.
+
+**Incorrect:**
+\`\`\`python
+# Bad pattern with inline comments explaining why
+\`\`\`
+
+**Correct:**
+\`\`\`python
+# Good pattern with inline comments explaining why
+\`\`\`
+
+**Key rules:**
+- Actionable bullet 1
+- Actionable bullet 2
+- Actionable bullet 3
+
+Reference: [Link to official docs](url)
+```
+
+### Impact Levels
+
+| Level | Meaning | Example |
+|-------|---------|---------|
+| CRITICAL | Silent data loss, security holes, crashes | Wrong state schema loses data across nodes |
+| HIGH | Broken functionality, poor reliability | Missing worker→supervisor edges cause hangs |
+| MEDIUM | Suboptimal but functional | Default stream mode returns full state |
+| LOW | Minor efficiency or style | Micro-optimization patterns |
+
+### Content Principles
+
+**"Claude already knows this"** — only add content Claude doesn't have.
+
+| Add | Skip |
+|-----|------|
+| LangGraph `Annotated[list, add]` gotcha | HTTP status code tables |
+| "Use Command API, not deprecated set_entry_point()" | "Use plural nouns for REST collections" |
+| Organization-specific conventions | Standard language features |
+| Non-obvious framework behavior | Basic design patterns |
+
+Ask: "Would Claude make a mistake without this rule?" If no, don't write it.
+
+### Naming Conventions
+
+- **Filenames**: `area-name.md` using kebab-case with area prefix
+- **Area prefix** = category from `_sections.md` (e.g., `state-`, `routing-`, `streaming-`)
+- **Examples**: `state-typeddict.md`, `routing-conditional.md`, `streaming-modes.md`
+
+### Size Guidelines
+
+- Individual rule: **40-100 lines** (including code blocks)
+- Max: **150 lines** — split if larger
+- Merge rules when: same area prefix, both < 80 lines, always needed together
+- **Max ~25 supporting files** per skill — consolidate if exceeding
+
+## `_sections.md`
+
+Table of contents for the `rules/` directory. Helps Claude navigate without reading every file.
+
+### Format
+
+```yaml
+---
+title: Skill Name Rule Categories
+version: 2.0.0
+---
+
+# Rule Categories
+
+## 1. Category Name (area-prefix) — IMPACT — N rules
+
+One-line description of what this category covers.
+
+- `area-name.md` — Brief description of this specific rule
+- `area-other.md` — Brief description of this specific rule
+
+## 2. Next Category (prefix) — IMPACT — N rules
+
+...
+```
+
+### Rules for `_sections.md`
+
+- Number categories sequentially
+- Format: `## N. Category (prefix) — IMPACT — N rules`
+- List every rule file with a one-line description
+- Keep descriptions short (< 15 words)
+
+## `_template.md`
+
+Copy-paste template for creating new rules. Place in every `rules/` directory.
+
+```yaml
+---
+title: [Rule Name]
+impact: [CRITICAL | HIGH | MEDIUM | LOW]
+impactDescription: "[What goes wrong without this rule]"
+tags: [tag1, tag2, tag3]
+---
+
+## [Rule Name]
+
+[Brief description — 1-2 sentences.]
+
+**Incorrect:**
+\`\`\`[language]
+// Bad pattern
+\`\`\`
+
+**Correct:**
+\`\`\`[language]
+// Good pattern
+\`\`\`
+
+**Key rules:**
+- [Rule 1]
+- [Rule 2]
+- [Rule 3]
+
+Reference: [link]
+```
+
+## References
+
+Explanatory content that helps Claude understand concepts to make decisions. NOT implementation instructions.
+
+### When to Use `references/`
+
+- Concept overviews ("what is X and how does it work")
+- Migration guides (step-by-step transitions)
+- Decision trees ("when to choose A vs B")
+- Example sessions, case studies
+- Rubrics and scoring templates
+- API documentation summaries
+
+### When NOT to Use `references/`
+
+If the content says "do this" or "don't do that" with code examples, it's a **rule**, not a reference.
+
+### Which Skills Use References Only
+
+Orchestration/workflow skills (implement, explore, verify, review-pr, assess, brainstorm, etc.) describe workflow phases, not code patterns. Their references are correct as-is — don't force them into `rules/` format.
+
+## Scripts
+
+Executable helpers that Claude runs without loading source into context. Only the output consumes tokens.
+
+### When to Use `scripts/`
+
+- Validation/linting wrappers
+- Scaffold generators
+- Data extraction utilities
+- Any operation that's more reliable as code than as instructions
+
+### Script Guidelines
+
+- Use `#!/usr/bin/env bash` for portability
+- Include `--help` flag
+- Handle errors explicitly — don't punt to Claude
+- Reference from SKILL.md: "Run `scripts/name.sh` to..."
+
+## `test-cases.json`
+
+Evaluation scenarios to verify skill effectiveness.
+
+### Format
+
+```json
+[
+  {
+    "skills": ["skill-name"],
+    "query": "User prompt that should trigger this skill",
+    "expected_behavior": [
+      "Claude does X",
+      "Claude applies Y pattern from rules/area-name.md",
+      "Output includes Z"
+    ]
+  }
+]
+```
+
+Include at least 3 scenarios per skill: a basic case, an edge case, and a case where the skill should NOT activate.
+
+## Prompt Cache-Friendly Patterns
+
+Claude Code's performance depends on prompt caching — prefix-matching that reuses computation across turns. Skills that break caching patterns increase cost and latency for users.
+
+### Why This Matters
+
+Prompt caching works by prefix matching: static system prompt, then tools, then CLAUDE.md, then session context, then messages. Any change to the prefix invalidates the cache for everything after it.
+
+### Rules
+
+1. **Use `context: fork` only for skills with task steps, and set `background: false`.** Forked skills reuse the parent conversation's cached prefix (system prompt + tools + CLAUDE.md), and the fork only adds the skill content as new tokens. Since CC 2.1.218 a fork runs in the background by default: the Skill call returns at once and the parent carries on without the result, so a task skill sets `background: false` to make the parent wait. A guideline-only reference skill (`user-invocable: false`, no task) never forks: per the CC skills docs, such a fork "receives the guidelines but no actionable prompt, and returns without meaningful output". Without the fork its content loads into the parent turn, which is the point of a reference skill. `tests/skills/structure/test-reference-skill-fork.sh` enforces this.
+
+2. **Never suggest model changes in skill instructions.** Switching models mid-conversation rebuilds the entire cache. Use subagents (`Agent` tool) for different models: each subagent is a separate conversation with its own cache.
+
+3. **Never add or remove tools dynamically.** Tools are part of the cached prefix. Skills should use state transitions via messages (like `EnterPlanMode`), not tool-set changes.
+
+4. **Keep subagent prompts prefix-similar.** When spawning multiple subagents of the same type, put shared context first and dimension-specific instructions last. This maximizes cache reuse across subagents hitting the same model.
+
+5. **Don't add MCP servers mid-session.** MCP tools are part of the cached prefix. Adding a server invalidates the cache for the entire conversation.
+
+6. **MCP tool descriptions and server instructions are each capped at 4,096 characters by default** (CC 2.1.296; it was 2,048 from CC 2.1.84 to 2.1.295; descriptions loaded through tool search are cut at 16,384 since CC 2.1.295; adjustable per session with `CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH` since CC 2.1.280). OpenAPI-generated MCP servers with verbose descriptions will be truncated. Keep tool descriptions and server instructions concise. Local MCP config wins over claude.ai connectors when both define the same server.
+
+7. **Prefer `additionalContext` in messages over system prompt changes.** Hooks and skills should inject dynamic information via `<system-reminder>` tags in user messages, never by modifying the system prompt.
+
+### Reference
+
+Based on [Prompt Caching Lessons from Building Claude Code](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching) — the Claude Code team monitors cache hit rate like uptime and declares incidents when it drops.
+
+## CC 2.1.49 Skill Patterns
+
+Features available since CC 2.1.49 that skills should leverage:
+
+### Worktree Isolation
+
+Skills that spawn teams or modify many files should offer `EnterWorktree` for isolated work:
+
+```python
+AskUserQuestion(questions=[{
+  "question": "Work in isolated worktree?",
+  "options": [
+    {"label": "Yes (Recommended)", "description": "Isolated branch, merge back when done"},
+    {"label": "No", "description": "Work directly on current branch"}
+  ]
+}])
+# If yes: EnterWorktree(name="feature-name")
+```
+
+### Agent Cleanup
+
+Skills that spawn background agents or teams **must** include cleanup guidance:
+
+- For teammate cleanup (CC 2.1.178+ implicit team, no TeamDelete), add: "Teammates wind down at turn end; press **Ctrl+F** twice to force-stop any orphaned background agents"
+- Skills using `run_in_background=True` should document the cleanup path
+
+### Background Agents
+
+Agent definitions can include `background: true` in frontmatter for agents that never need interactive results. When referencing these agents from skills, note they always run in background.
+
+### Background Bash Output Limit (CC 2.1.77)
+
+CC 2.1.77 kills background bash tasks if their output exceeds **5GB**. This prevents runaway processes from filling disk. Skills that spawn long-running background commands should:
+
+- **Pipe verbose output to files** instead of capturing in CC: `npm test -- --verbose > /tmp/test-output.log 2>&1`
+- **Use `tail -f`** to monitor log files rather than capturing full streams
+- **Avoid `--verbose` flags** on commands with large output (test suites, builds) when running in background
+- Reference: `chain-patterns` Pattern 6 (Progressive Output)
+
+### SendMessage Auto-Resume (CC 2.1.77)
+
+`SendMessage` now auto-resumes stopped agents — no error handling needed. The `resume` parameter on the Agent tool has been **removed**. Always use `SendMessage({to: agentId})` to continue a previously spawned agent. See `chain-patterns` Pattern 7.
+
+### Effort-Aware Skill Design (CC 2.1.76)
+
+Skills with multi-phase workflows should include an **effort-scaling table** that maps `/effort` levels to reduced phases and agent counts. This is soft guidance — Claude reads the table and adapts, but it's not enforced in code. The hook layer handles token budget scaling separately.
+
+**Reference pattern** (from brainstorm STEP 0c):
+
+```markdown
+## STEP 0: Effort-Aware Scaling (CC 2.1.76)
+
+| Effort Level | Phases Run | Agents | Token Budget |
+|-------------|------------|--------|--------------|
+| **low** | Phase 1 → Phase 5 only | 2 max | ~50K |
+| **medium** | Phase 1 → 2 → 5 → 7 | 3 max | ~150K |
+| **high** (default) | All phases | 4-7 | ~400K |
+
+> Override: Explicit user selection overrides /effort downscaling.
+```
+
+Place effort tables **before** the AskUserQuestion step so Claude reads them before asking the user. Include an override note — if the user explicitly requests full analysis, respect that regardless of effort level.
+
+Skills that already have effort tables: brainstorm, implement, verify, cover, fix-issue.
+
+### /loop Suggestions in Next Steps (CC 2.1.71)
+
+Skills that produce artifacts users may want to monitor should include `/loop` suggestions in their "Next Steps" section. Generic chain: `verify` after a wait. Claude Code adapter: `/loop 20m /ork:verify`. Unique to `/loop` (CronCreate takes raw prompts only). See `chain-patterns` Pattern 8.
+
+### Plugin Settings
+
+OrchestKit ships `settings.json` per plugin (`src/settings/<plugin>.settings.json`), but Claude Code reads only a narrow set of keys from a plugin settings file. Do not add `keybindings`, `statusLine` or `spinnerVerbs` there — #3357 removed those precisely because they were never read, and keybindings additionally cannot target a skill (Claude Code binds keys to a closed set of built-in actions only). Keybindings belong to the user, in `~/.claude/keybindings.json`.
+
+## Writing Effective Instructions
+
+### Explain the Why, Not Just the What
+
+If you find yourself writing ALWAYS or NEVER in all caps, that's a yellow flag. Today's LLMs are smart — they have good theory of mind and when given a clear explanation of *why* something matters, they go beyond rote instructions. Reframe heavy-handed rules into reasoning:
+
+**Weak:**
+```
+ALWAYS use conventional commit format. NEVER skip the scope.
+```
+
+**Strong:**
+```
+Use conventional commit format (feat/fix/chore) because our changelog
+generator parses these prefixes to categorize releases. Without a scope,
+the changelog groups changes under "other" which is unhelpful for users
+scanning release notes.
+```
+
+The reasoning approach is more humane, powerful, and effective than shouting in caps.
+
+### Description Quality
+
+The `description` field is the primary trigger mechanism — Claude decides whether to load a skill based on this text. Write descriptions that:
+
+1. **Include positive triggers**: what the skill does and when to use it
+2. **Include negative boundaries**: "Do NOT use for..." to prevent false positives
+3. **Cover casual phrasing**: users say "save my progress" not "create a conventional commit"
+
+**Good description:**
+```
+Creates commits with conventional format and validation. Use when
+committing changes, generating commit messages, or saving progress.
+Do NOT use for pushing, rebasing, squashing, or branch operations.
+```
+
+**Bad description:**
+```
+Helps with git commits.
+```
+
+### Eval Coverage (User-Invocable Skills)
+
+User-invocable skills (`user-invocable: true`) MUST include eval entries in `tests/evals/skills/<name>.eval.yaml`. This file tests two things:
+
+1. **Trigger accuracy** — Does the skill fire on the right prompts and stay silent on wrong ones?
+2. **Quality** — Does the skill produce better output than base Claude without the plugin?
+
+```yaml
+# tests/evals/skills/my-skill.eval.yaml
+id: my-skill
+name: "My skill evaluation"
+skill_path: src/skills/my-skill/SKILL.md
+plugin_dir: plugins/ork
+
+trigger_evals:
+  # Should trigger — direct requests
+  - prompt: "realistic user prompt that should trigger"
+    should_trigger: true
+  # Should trigger — casual/indirect phrasing
+  - prompt: "informal way of asking for the same thing"
+    should_trigger: true
+  # Should NOT trigger — near-miss (shares keywords, different skill)
+  - prompt: "adjacent task that should NOT trigger"
+    should_trigger: false
+
+quality_evals:
+  - prompt: "task to compare with-skill vs baseline"
+    scaffold: typescript-nextjs  # optional: empty, python-fastapi, typescript-nextjs
+    assertions:
+      - name: "specific outcome"
+        check: "what to look for in output (descriptive, not regex — graded by LLM)"
+```
+
+#### Eval Entry Requirements
+
+| Requirement | Minimum |
+|-------------|---------|
+| Trigger entries | 5+ (3+ `should_trigger: true`, 2+ `should_trigger: false`) |
+| Quality entries | 1+ with graded assertions |
+| Near-miss negatives | At least 1 prompt that shares keywords but needs a different skill |
+| Cross-skill confusion | At least 1 pair that distinguishes from a similar skill |
+
+#### Writing Good Trigger Entries
+
+- **Positives**: Include casual phrasing ("save my progress"), indirect requests, varied vocabulary
+- **Negatives**: Use near-misses that share keywords. "push to main" shares git context with `commit` but is not a commit task
+- **Cross-skill confusion**: Test boundaries between similar skills. "assess this PR" (assess) vs "review this PR" (review-pr)
+
+#### Writing Good Quality Assertions
+
+Assertions are **descriptive, not regex** — an LLM grades the output against the check string.
+
+**Good:** `"commit message starts with feat, fix, refactor, or chore prefix"`
+**Bad:** `"output matches ^(feat|fix|refactor|chore)"`
+
+#### The "Explain Why" Principle
+
+If your SKILL.md uses ALWAYS or NEVER in caps, reframe with reasoning so the model understands *when* to apply the rule:
+
+**Bad:** `ALWAYS run tests before committing`
+**Better:** `Run tests before committing — a commit that breaks CI wastes reviewer time and blocks the pipeline`
+
+#### Description Requirements
+
+Skill descriptions must be **50-200 words** and include:
+- **WHAT** the skill does (capabilities)
+- **WHEN** to use it (trigger conditions, in third person)
+- **Negative boundary**: "Do NOT use for..." to prevent false triggers
+
+#### Running Evals Locally (CC Max)
+
+Evals run locally using `claude -p` with CC Max (free, 5x per query):
+
+```bash
+npm run eval:trigger -- commit           # trigger accuracy for one skill
+npm run eval:trigger -- --all            # all skills with .eval.yaml files
+npm run eval:trigger -- --tag core       # filter by tag (matches tags[] in YAML)
+npm run eval:trigger -- --reps 3         # override repetitions (default: 5)
+npm run eval:trigger -- --dry-run        # validate YAML only, no Claude calls
+```
+
+## Task Management in Multi-Phase Skills (CC 2.1.16)
+
+Skills with 3+ sequential phases must include a **Task Management** section with the full lifecycle pattern. This gives users spinner feedback, enables dependency tracking, and coordinates multi-agent work.
+
+### When to Add Task Management
+
+| Skill Type | Task Management Required? |
+|------------|--------------------------|
+| Workflow skills (implement, verify, review-pr) | **Yes** — multi-phase with agent coordination |
+| Knowledge/reference skills (api-design, testing-unit) | **No** — single-pass, no phases |
+| Utility skills (commit, help) | **No** — trivial, <3 steps |
+
+### Required Pattern
+
+Every task-enabled skill needs these 5 elements in a code block:
+
+```python
+## CRITICAL: Task Management is MANDATORY (CC 2.1.16)
+
+# 1. Create main task with activeForm for spinner UX
+TaskCreate(
+  subject="{SkillName}: {target}",
+  description="What this skill does for {target}",
+  activeForm="{Doing the thing} {target}"
+)
+
+# 2. Create subtasks matching actual workflow phases
+TaskCreate(subject="Phase 1 name", activeForm="Doing phase 1")  # id=2
+TaskCreate(subject="Phase 2 name", activeForm="Doing phase 2")  # id=3
+TaskCreate(subject="Phase 3 name", activeForm="Doing phase 3")  # id=4
+
+# 3. Set dependencies for sequential phases
+TaskUpdate(taskId="3", addBlockedBy=["2"])
+TaskUpdate(taskId="4", addBlockedBy=["3"])
+
+# 4. Before starting each task, verify it's unblocked
+task = TaskGet(taskId="2")  # Verify blockedBy is empty
+
+# 5. Update status as you progress
+TaskUpdate(taskId="2", status="in_progress")  # When starting
+TaskUpdate(taskId="2", status="completed")    # When done
+```
+
+### Key Rules
+
+- **`activeForm` is required** on every `TaskCreate` — it powers the spinner text users see
+- **`addBlockedBy`** for sequential phases — prevents starting work before dependencies complete
+- **`TaskGet` before starting** — validate blockedBy is empty (catches stale state)
+- **Never skip `in_progress`** — the transition must be `pending` → `in_progress` → `completed`
+- **Fan-in for parallel phases** — if phases 3, 4, 5 run in parallel and phase 6 needs all of them: `TaskUpdate(taskId="7", addBlockedBy=["4", "5", "6"])`
+
+### Reference
+
+See `task-dependency-patterns` skill for the complete pattern library: dependency chains, fan-out/fan-in, agent team coordination, context exhaustion handling.
+
+## Agent Coordination Patterns (CC 2.1.33+)
+
+Skills that spawn Agent subagents should include these coordination patterns. This ensures agents don't work in silos and users see progress.
+
+### Context Passing (Required for agent-spawning skills)
+
+Every Agent prompt must include project context, not just "do X":
+
+```python
+Agent(
+  subagent_type="ork:backend-system-architect",
+  prompt=f"""Design backend for: {feature}
+Changed files: {changed_files}
+Project conventions: {conventions_from_memory}
+Constraints: {constraints}
+Prior decisions: {decisions_from_earlier_phases}""",
+  run_in_background=True
+)
+```
+
+### SendMessage for Active Coordination
+
+When agents need to share findings mid-flight, use `SendMessage`:
+
+```python
+# Agent A finds something Agent B needs
+SendMessage(to="security-auditor", message="Found SQL injection in auth.ts:42 — prioritize this")
+
+# Agent B requests clarification
+SendMessage(to="backend-architect", message="What ORM pattern are you using? Affects my schema review.")
+```
+
+Use for: evidence sharing, dynamic work distribution, conflict resolution between agents.
+
+### Agent Teams Alternative (complexity > 3.0)
+
+For complex skills where agents benefit from debate/cross-pollination, offer a mesh topology:
+
+```python
+# In SKILL.md — offer as alternative to star topology
+# Load Agent Teams config (bare relative: resolved against this skill's directory):
+#   Read("references/agent-teams-mode.md")
+```
+
+Decision guidance:
+- **Star (Agent tool)**: Independent tasks, cost-sensitive, < 3 agents
+- **Mesh (Agent Teams)**: Cross-cutting concerns, agents need to talk, 3+ agents
+
+### Skill Chain Dependencies
+
+When a skill references another skill, create a task dependency. Invoke by skill name. The `/ork:` slash form is Claude Code only (see `references/claude-code.md` on workflow skills).
+
+```python
+# After implement completes, chain to verify
+TaskCreate(subject="Verify implementation", activeForm="Verifying changes")
+TaskUpdate(taskId="verify-task", addBlockedBy=["implement-task"])
+# Then invoke verify
+```
+
+## Checklist
+
+Before submitting a skill change:
+
+- [ ] SKILL.md under 500 lines
+- [ ] Description includes WHAT + WHEN (third person)
+- [ ] Description includes negative boundaries ("Do NOT use for...")
+- [ ] Instructions explain *why*, not just *what* (avoid ALWAYS/NEVER in caps)
+- [ ] Rules have YAML frontmatter with impact tag
+- [ ] Rules have incorrect/correct examples
+- [ ] `_sections.md` lists all rule files
+- [ ] No content Claude already knows (the "Claude filter")
+- [ ] Area-prefixed filenames in `rules/`
+- [ ] Supporting files referenced from SKILL.md
+- [ ] Same-skill references are bare relative (`references/x.md`), not `${CLAUDE_PLUGIN_ROOT}/skills/<this-skill>/`
+- [ ] Team-spawning skills include `Ctrl+F` cleanup note
+- [ ] **Multi-phase skills (3+ phases) include Task Management section with full lifecycle**
+- [ ] User-invocable skills have eval YAML in `tests/evals/skills/`
+- [ ] Eval YAML has 5+ trigger entries (3+ true, 2+ false) and 1+ quality entry
+- [ ] Eval includes near-miss negatives and cross-skill confusion tests
+- [ ] `npm run eval:trigger -- <skill> --dry-run` passes (validates YAML)
+- [ ] `npm run build` passes
+- [ ] `npm run test:skills` passes
+- [ ] Run `/reload-plugins` to activate changes without restarting (CC 2.1.69+)

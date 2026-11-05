@@ -1,0 +1,26 @@
+{
+  "name": "ork",
+  "version": "10.9.0",
+  "description": "A Claude Code plugin library: 115 skills, 36 agents and 161 hooks for planning, building, reviewing and shipping software. Open source, MIT.",
+  "author": {
+    "name": "Yonatan Gross",
+    "email": "yonaigross@gmail.com",
+    "url": "https://github.com/yonatangross/orchestkit"
+  },
+  "homepage": "https://github.com/yonatangross/orchestkit",
+  "repository": "https://github.com/yonatangross/orchestkit",
+  "license": "MIT",
+  "keywords": [
+    "ai-development",
+    "langgraph",
+    "fastapi",
+    "react",
+    "typescript",
+    "python",
+    "multi-agent"
+  ],
+  "skills": "./skills/",
+  "agents": "./agents/",
+  "commands": "./.cursor-plugin/commands/",
+  "rules": "./.cursor-plugin/rules/"
+}
