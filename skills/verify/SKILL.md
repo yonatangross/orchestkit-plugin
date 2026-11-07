@@ -2,7 +2,7 @@
 name: verify
 license: MIT
 compatibility: "Claude Code 2.1.277+. Requires memory MCP server."
-description: "Grades existing work for merge: runs current unit, integration and E2E suites, security and type checks, scores 0-10 with a VERIFIED vs CLAIMED manifest. Use when checking a change is ready to merge. To write missing tests, use cover."
+description: "Grades work for merge: runs unit, integration and E2E suites plus security and type checks, scores 0-10 with a VERIFIED vs CLAIMED manifest. Use when deciding if work can ship. Not for adding missing tests (use cover)."
 argument-hint: "[feature-or-scope]"
 user-invocable: true
 allowed-tools: "SendMessage AskUserQuestion Bash Read Write Edit Grep Glob Agent Workflow TaskCreate TaskUpdate TaskList TaskStop mcp__memory__search_nodes ToolSearch CronCreate CronDelete Monitor PushNotification"
@@ -75,7 +75,7 @@ Pass `MODEL_OVERRIDE` to all Agent() calls via `model=MODEL_OVERRIDE` when set. 
 
 ---
 
-## STEP 0: Effort-Aware Verification Scaling (CC 2.1.76)
+## STEP 0: Effort-Aware Verification Scaling
 
 Scale verification depth based on `/effort` level:
 
@@ -83,8 +83,8 @@ Scale verification depth based on `/effort` level:
 |-------------|------------|--------|--------|
 | **low** | Run tests only → pass/fail | 0 agents | Quick check |
 | **medium** | Tests + code quality + security + API compliance | 4 agents | Score + top issues |
-| **high** (default) | All 8 phases + visual capture | 6-7 agents | Full report + grades |
-| **xhigh** (Opus 5, CC 2.1.111+) | All 8 phases + additional cross-file pattern sweep + self-verification pass | 6-7 agents | Full report with uncertainty annotations |
+| **high** (default) | All 8 phases + 2.5 visual capture | 6 agents | Full report + grades |
+| **xhigh** | All 8 phases + 2.5 visual capture + cross-file pattern sweep + self-verification pass | 6 agents | Full report with uncertainty annotations |
 
 > **Override:** Explicit user selection (e.g., "Full verification") overrides `/effort` downscaling.
 
@@ -110,8 +110,8 @@ AskUserQuestion(
 ```
 
 **Based on answer, adjust workflow:**
-- **Full verification**: All 9 phases (8 + 2.5), 7 parallel agents including visual capture
-- **Tests only**: Skip phases 2 (security), 5 (UI/UX analysis)
+- **Full verification**: All 8 phases plus 2.5 (visual capture), 6 parallel Phase 2 agents
+- **Tests only**: Skip Phase 2 (agent dispatch) and 2.5 (visual capture)
 - **Security & code quality**: Run security-auditor + code-quality-reviewer agents
 - **Quick check**: Run tests only, skip grading and suggestions (skips Phase 2, outside the Fan-out rule)
 
@@ -130,7 +130,7 @@ Default: **Workflow** (star, `workflows/verify-dispatch.js` runs Phase 2). Choos
 ### MCP Probe + Resume
 
 ```python
-# memory is alwaysLoad in .mcp.json (CC 2.1.121+, #1541) — probe below kept as fallback for older CC:
+# memory may be absent from the user's .mcp.json; probe so the memory steps below are skipped, not failed:
 ToolSearch(query="select:mcp__memory__search_nodes")
 Write(".claude/chain/capabilities.json", { memory, timestamp })
 
@@ -152,7 +152,7 @@ Write(".claude/chain/verify-results.json", JSON.stringify({
 }))
 ```
 
-### Regression Monitor (CC 2.1.71)
+### Regression Monitor
 
 Optionally schedule post-verification monitoring:
 
@@ -218,7 +218,7 @@ Workflow(
 
 **The script owns the mechanics, not the prose.** It spawns the effort-scaled verifiers (security first) with an evidence schema, sends critical blockers and low scores to refuters (1 vote at high, 3 at xhigh, majority of planned votes, each refutation backed by a command), enforces a 12-agent ceiling, and returns `verdictCap` with `reasons`. Anything it cannot establish lowers the cap: an unknown dimension, a missing rubric, a score with no command-backed evidence, a CLAIMED item, a dead verifier. Without `testEvidence` it returns `PENDING-TESTS` plus `capIfTestsPass`: after the gate below, the cap is `capIfTestsPass` only for EVIDENCE with exit 0 and a summary showing at least one passing test and no failures, otherwise BLOCKED. Security below 9.0 is BLOCKED for every project (operator decision 2026-09-25); a policy may tighten other thresholds, never loosen any. Phase 4 grades within the cap, never above it.
 
-### Monitor + Partial Results (CC 2.1.98)
+### Monitor + Partial Results
 
 Use `Monitor` for streaming test output. **A `run_in_background` request may not be honoured, so never wait unconditionally on the result.**
 
@@ -367,7 +367,7 @@ Load details: `Read("references/report-template.md")` for full format. Summary:
 
 **Done sign-off (last step).** After the report, the verdict is not "done" until the user accepts it. Load `Read("../../shared/rules/done-signoff.md")` and ask its one question with the three labels unchanged: "Accept done", "Show me the evidence", "Not satisfied". Lead with any BLOCKED dimension or FAIL. On "Show me the evidence", re-run the named check live and ask again. Skip the question in non-interactive runs (`claude -p`, a Workflow phase) and return the verdict as data instead.
 
-> **Push notifications (CC 2.1.110+):** Verify runs for >5 min are common on complex changes. When the final verdict is ready, call `PushNotification` to alert the user — they likely walked away from the terminal. Requires Remote Control with "Push when Claude decides" config; fails silently for users without it.
+> **Push notifications:** Verify runs for >5 min are common on complex changes. When the final verdict is ready, call `PushNotification` to alert the user — they likely walked away from the terminal. Requires Remote Control with "Push when Claude decides" config; fails silently for users without it.
 >
 > ```python
 > PushNotification(
@@ -445,7 +445,7 @@ TaskUpdate(taskId=commit_id, addBlockedBy=[verify_task_id])
 # Then: commit
 ```
 
-> **Session recovery (CC 2.1.108+):** After idle periods or interruptions, use `/recap` to restore conversational context alongside checkpoint-resume state. Enabled by default since CC 2.1.110 (even with telemetry disabled).
+> **Session recovery:** After idle periods or interruptions, use `/recap` to restore conversational context alongside checkpoint-resume state. Enabled by default since CC 2.1.110 (even with telemetry disabled).
 
 ## Quality Bar
 
