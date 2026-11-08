@@ -6,4 +6,4 @@ This repository is a build output: the contents of `plugins/ork` from [orchestki
 copied to the repository root by the orchestkit release workflow on every stable release,
 so the Claude Code plugin directory can read a small repository.
 
-This commit was built from orchestkit v10.10.2. Source, issues and docs: https://github.com/yonatangross/orchestkit
+This commit was built from orchestkit v10.10.3. Source, issues and docs: https://github.com/yonatangross/orchestkit
