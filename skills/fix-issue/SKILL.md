@@ -2,14 +2,14 @@
 name: fix-issue
 license: MIT
 compatibility: "Claude Code 2.1.277+. Requires memory MCP server, context7 MCP server, gh CLI."
-description: "Fixes a GitHub issue: parallel root-cause analysis, a fix with tests, a PR linked back to the issue, and prevention notes. Use when fixing a bug, regression or reported issue."
+description: "Triages and fixes a GitHub issue given its number or URL: root cause and culprit (stack trace, blame), a fix with tests, a linked PR, prevention notes. Use for issue #N or a URL; it stops without one."
 argument-hint: "[issue-number]"
 context: fork
 # user-typed commands stay interactive; CC >= 2.1.218 backgrounds forks by default (#3093)
 background: false
 user-invocable: true
 allowed-tools: "SendMessage AskUserQuestion Bash Read Write Edit Agent TaskCreate TaskUpdate TaskStop Grep Glob ToolSearch ExitWorktree CronCreate CronDelete PushNotification mcp__memory__search_nodes mcp__memory__create_entities mcp__context7__resolve-library-id mcp__context7__query-docs"
-skills: [explore, verify, memory, remember, chain-patterns]
+skills: [explore, verify, memory, chain-patterns]
 model: sonnet
 metadata:
   category: workflow-automation
@@ -455,7 +455,7 @@ Done means all of these hold:
 - `debug-investigator` - Debug complex issues
 - `browser-tools` - Visual inspection with agent-browser + Portless
 - `ork:issue-progress-tracking` - Auto-updates from commits
-- `ork:remember` - Store lessons learned
+- `ork:memory remember` - Store lessons learned
 
 > **Session recovery (CC 2.1.108+):** After idle periods or interruptions, use `/recap` to restore conversational context alongside checkpoint-resume state. Enabled by default since CC 2.1.110 (even with telemetry disabled).
 

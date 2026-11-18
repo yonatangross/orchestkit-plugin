@@ -20,7 +20,7 @@ metadata:
 
 The front door to OrchestKit. **You describe a goal in plain English; the router classifies it and hands off to the right specialist.** One entry point, many execution paths.
 
-> **Why this exists:** OrchestKit has 116 skills, but usage telemetry shows users fire only the handful they can name by memory (10 distinct skills across thousands of sessions). The dominant cause of "dead" skills is **no front door** — not low quality. This router turns "you must know the exact `/ork:<name>`" into "describe what you want."
+> **Why this exists:** OrchestKit has 115 skills, but usage telemetry shows users fire only the handful they can name by memory (10 distinct skills across thousands of sessions). The dominant cause of "dead" skills is **no front door** — not low quality. This router turns "you must know the exact `/ork:<name>`" into "describe what you want."
 
 **Core principle:** routing is a *deterministic workflow*, not an autonomous agent (Anthropic, *Building Effective Agents*). Classify → confirm → hand off. The router never does the work itself — it picks who does.
 
@@ -49,17 +49,18 @@ so there is no "too obvious for auto".
 | intent | signal words | routes to |
 |---|---|---|
 | **fix** | fix, debug, broken, failing, error, crash, regression | `fix-issue` |
-| **diagnose** | why, why isn't, why does, why can't, investigate | `fix-issue` (investigation-first) |
+| **diagnose** | why, why isn't, why does, why can't, investigate, triage, root cause, culprit commit | `fix-issue` (investigation-first) |
 | **optimize** | faster, reduce, latency, bundle, minimize, below N ms | a **`/goal` optimization loop** (see Gaps) |
 | **cover** | coverage, untested, get to N% | `cover --target N` |
 | **e2e** | e2e, in the browser, browser test, playwright | `expect` (run on the diff); `cover` when no e2e tests exist yet |
 | **design** | design, architect, how should we, explore, idea | `/ork:brainstorm` |
 | **build** | build, implement, create, add feature, from ticket | `implement` |
-| **review** | review, PR, MR, pull request, #N | `review-pr` |
+| **review** | review, PR, MR, pull request, #N, diff | `review-pr` |
+| **open-pr** | open a PR, make a PR, PR title and body, ready for review, go up for review | `create-pr` |
 | **verify** | verify, check, make sure, passes, green | `verify` |
 | **improve-skill** | improve the skill, optimize the prompt, SKILL.md | the **holdout-promotion gate** (see Gaps) |
 | **setup** | set up OrchestKit, onboard this repo, which skills fit this project, rescan the stack | `/ork:setup` |
-| **migrate** | across all repos, every repo, org-wide, roll out to N repos, bump in each consumer | `/ork:swarm-migrate` |
+| **migrate** | across all repos, every repo, org-wide, roll out to N repos, bump in each consumer | `/ork-extras:swarm-migrate` (formerly a core ork skill; needs the opt-in ork-extras plugin, slash-only) |
 | **(fallback)** | no confident category | clarify with ONE question |
 
 Full per-category parameter extraction + edge cases: `references/routing-rules.md`.
@@ -160,8 +161,8 @@ Invoke the target skill with the extracted parameters and **follow that skill's 
 Routing accuracy is gateable, not vibes. `routing-benchmark.json` holds 78 labeled `goal → category` pairs (easy + genuinely ambiguous). Validate after any change to the category table or disambiguation rules:
 
 ```bash
-# isolated classification check: /ork:bare-eval grades router output against routing-benchmark.json
-/ork:bare-eval
+# isolated classification check: /ork-extras:bare-eval grades router output against routing-benchmark.json
+/ork-extras:bare-eval
 ```
 
 Target ≥95% category accuracy; track the fallback rate as a degradation alarm as the skill library grows.
@@ -189,5 +190,5 @@ Done means all of these hold:
 
 - `help` — static categorized directory (browse, don't route)
 - `prd-to-goal` — decompose a spec into a `/goal` line (the `optimize` route's engine)
-- `fix-issue` · `cover` · `expect` · `brainstorm` · `implement` · `review-pr` · `verify` · `setup` · `swarm-migrate`: the route targets
+- `fix-issue` · `cover` · `expect` · `brainstorm` · `implement` · `review-pr` · `create-pr` · `verify` · `setup` · `swarm-migrate`: the route targets
 - `assess` — champion/challenger holdout gate (the `improve-skill` route)

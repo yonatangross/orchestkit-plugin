@@ -1,5 +1,5 @@
 ---
-description: "Fixes a GitHub issue: parallel root-cause analysis, a fix with tests, a PR linked back to the issue, and prevention notes. Use when fixing a bug, regression or reported issue."
+description: "Triages and fixes a GitHub issue given its number or URL: root cause and culprit (stack trace, blame), a fix with tests, a linked PR, prevention notes. Use for issue #N or a URL; it stops without one."
 argument-hint: "[issue-number]"
 model: sonnet
 context: fork
@@ -490,7 +490,7 @@ Done means all of these hold:
 - `debug-investigator` - Debug complex issues
 - `browser-tools` - Visual inspection with agent-browser + Portless
 - `ork:issue-progress-tracking` - Auto-updates from commits
-- `ork:remember` - Store lessons learned
+- `ork:memory remember` - Store lessons learned
 
 > **Session recovery (CC 2.1.108+):** After idle periods or interruptions, use `/recap` to restore conversational context alongside checkpoint-resume state. Enabled by default since CC 2.1.110 (even with telemetry disabled).
 
