@@ -1,7 +1,7 @@
 ---
 name: assess
 license: MIT
-compatibility: "Claude Code 2.1.277+. Requires memory MCP server."
+compatibility: "Claude Code 2.1.327+. Requires memory MCP server."
 description: "Rates code, designs or approaches 0-10 across quality dimensions with pros, cons and fixes. Use when evaluating or comparing options. Not for fixing or building (use implement or fix-issue), PR review (use review-pr) or running tests (use verify)."
 user-invocable: true
 allowed-tools: "AskUserQuestion Read Write Grep Glob Agent Workflow TaskCreate TaskUpdate TaskList ToolSearch mcp__memory__search_nodes Bash"
@@ -273,6 +273,8 @@ Write(".claude/chain/02-evaluation.json", result)
 Fallback (no Workflow tool, `ORCHESTKIT_FORCE_TASK_TOOL=1`, or the cross-model lane below): `Read("references/agent-spawn-definitions.md")` for Agent tool and Agent Teams spawns, then run Phase 2.5 by hand.
 
 **Fan-out rule:** a single pass is never a fallback when the selected focus runs Phase 2. Phase 2 runs through the Workflow call or the Agent tool fallback; if neither spawns an assessor, end the run as BLOCKED and say why.
+
+**Refused workflow rule:** if the Workflow call is refused, errors or is unavailable, the report's first Phase 2 line reads `Phase 2: assess-fanout workflow not run (<refused|error|unavailable>: <reason>), fell back to <Agent Teams|Agent tool>`, and every score and the verdict are reported as producer basis only, never as engine-refuted, because the refuter majority, score schema and dedup in assess-fanout.js did not run in code (Phase 2.5 may still run by hand per the fallback above).
 
 **Composite Score:** Weighted average of the scored dimensions (see quality-model.md).
 
